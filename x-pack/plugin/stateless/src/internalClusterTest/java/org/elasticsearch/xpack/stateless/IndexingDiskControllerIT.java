@@ -38,7 +38,6 @@ import org.elasticsearch.indices.IndexingMemoryController;
 import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.repositories.RepositoriesService;
-import org.elasticsearch.telemetry.metric.MeterRegistry;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.InternalSettingsPlugin;
 import org.elasticsearch.test.junit.annotations.TestLogging;
@@ -407,10 +406,9 @@ public class IndexingDiskControllerIT extends AbstractStatelessPluginIntegTestCa
             RepositoriesService repositoriesService,
             ThreadPool threadPool,
             ClusterService clusterService,
-            ProjectResolver projectResolver,
-            MeterRegistry meterRegistry
+            ProjectResolver projectResolver
         ) {
-            return new TestObjectStoreService(settings, repositoriesService, threadPool, clusterService, projectResolver, meterRegistry);
+            return new TestObjectStoreService(settings, repositoriesService, threadPool, clusterService, projectResolver);
         }
     }
 
@@ -427,10 +425,9 @@ public class IndexingDiskControllerIT extends AbstractStatelessPluginIntegTestCa
             RepositoriesService repositoriesService,
             ThreadPool threadPool,
             ClusterService clusterService,
-            ProjectResolver projectResolver,
-            MeterRegistry meterRegistry
+            ProjectResolver projectResolver
         ) {
-            super(settings, repositoriesService, threadPool, clusterService, projectResolver, meterRegistry);
+            super(settings, repositoriesService, threadPool, clusterService, projectResolver);
         }
 
         synchronized void block() {
