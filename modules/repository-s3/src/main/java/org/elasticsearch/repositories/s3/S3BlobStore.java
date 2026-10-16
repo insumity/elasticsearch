@@ -675,7 +675,6 @@ class S3BlobStore implements BlobStore {
         });
     }
 
-
     // a request-level plugin to disable retries for this request
     private static final SdkPlugin NO_RETRY_PLUGIN = config -> config.overrideConfiguration(
         ClientOverrideConfiguration.builder().retryStrategy(DefaultRetryStrategy.doNotRetry()).build()

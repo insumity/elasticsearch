@@ -850,8 +850,8 @@ public class ObjectStoreService extends AbstractLifecycleComponent implements Cl
         return ProjectId.DEFAULT;
     }
 
-    public void uploadTranslogFile(String fileName, BytesReference reference, ActionListener<Void> listener) {
-        enqueueTask(listener, uploadTranslogTaskRunner, l -> new TranslogFileUploadTask(fileName, reference, l));
+    public void uploadTranslogFile(String fileName, BytesReference reference, @Nullable TimeValue timeout, ActionListener<Void> listener) {
+        enqueueTask(listener, uploadTranslogTaskRunner, l -> new TranslogFileUploadTask(fileName, reference, timeout, l));
     }
 
     public void uploadBatchedCompoundCommitFile(
@@ -1575,11 +1575,13 @@ public class ObjectStoreService extends AbstractLifecycleComponent implements Cl
         private final String fileName;
         private final BytesReference reference;
         private final ActionListener<Void> listener;
-        private final TimeValue timeout = TimeValue.MINUS_ONE;
+        @Nullable
+        private final TimeValue timeout;
 
-        TranslogFileUploadTask(String fileName, BytesReference reference, ActionListener<Void> listener) {
+        TranslogFileUploadTask(String fileName, BytesReference reference, @Nullable TimeValue timeout, ActionListener<Void> listener) {
             this.fileName = Objects.requireNonNull(fileName);
             this.reference = Objects.requireNonNull(reference);
+            this.timeout = timeout;
             this.listener = Objects.requireNonNull(listener);
         }
 

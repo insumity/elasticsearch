@@ -1411,6 +1411,7 @@ public class StatelessPlugin extends Plugin
             TranslogReplicator.FLUSH_RETRY_INITIAL_DELAY_SETTING,
             TranslogReplicator.FLUSH_INTERVAL_SETTING,
             TranslogReplicator.FLUSH_SIZE_SETTING,
+            TranslogReplicator.INITIAL_TRANSLOG_UPLOAD_TIMEOUT,
             IndexEngine.MERGE_PREWARM,
             IndexEngine.MERGE_FORCE_REFRESH_SIZE,
             IndexEngine.MERGE_BACKLOG_THROTTLE_FACTOR,

@@ -99,6 +99,18 @@ public class TranslogReplicator extends AbstractLifecycleComponent {
         Setting.Property.NodeScope
     );
 
+    /**
+     * Initial timeout for translog uploads. This timeout is the basis for the first translog-upload operation before being adjusted by the
+     * {@link UploadTranslogTask} retry logic. Set to {@code -1} (default) for no timeout.
+     * NOTE: At the moment, this is ONLY applicable to S3.
+     */
+    public static final Setting<TimeValue> INITIAL_TRANSLOG_UPLOAD_TIMEOUT = Setting.timeSetting(
+        "stateless.translog.upload.initial_timeout",
+        TimeValue.MINUS_ONE,
+        TimeValue.MINUS_ONE,
+        Setting.Property.NodeScope
+    );
+
     private volatile BigArrays bigArrays = BigArrays.NON_RECYCLING_INSTANCE;
     private final ObjectStoreService objectStoreService;
     private final StatelessClusterConsistencyService consistencyService;
@@ -114,6 +126,7 @@ public class TranslogReplicator extends AbstractLifecycleComponent {
     private final TimeValue flushRetryInitialDelay;
     private final TimeValue flushInterval;
     private final ByteSizeValue flushSizeThreshold;
+    private final TimeValue initialTranslogUploadTimeout;
     private final LongHistogram translogUploadAttemptsHistogram;
     private final LongHistogram translogUploadTotalDurationHistogram;
 
@@ -179,6 +192,7 @@ public class TranslogReplicator extends AbstractLifecycleComponent {
         this.flushRetryInitialDelay = FLUSH_RETRY_INITIAL_DELAY_SETTING.get(settings);
         this.flushInterval = FLUSH_INTERVAL_SETTING.get(settings);
         this.flushSizeThreshold = FLUSH_SIZE_SETTING.get(settings);
+        this.initialTranslogUploadTimeout = INITIAL_TRANSLOG_UPLOAD_TIMEOUT.get(settings);
         this.consistencyService = consistencyService;
         this.supportsMultipleProjects = supportsMultipleProjects;
         this.currentPrimaryTerm = currentPrimaryTerm;
@@ -483,9 +497,16 @@ public class TranslogReplicator extends AbstractLifecycleComponent {
             // Retain the bytes to ensure that a cancel call does not corrupt them before upload
             if (bytesToClose.tryIncRef()) {
                 logger.trace(() -> format("attempt [%s] to upload translog file [%s]", uploadTryNumber, translog.metadata().name()));
+
+                // we only bound the first upload for now to avoid potentially timing out all uploads
+                final TimeValue timeout = uploadTryNumber == 1 && initialTranslogUploadTimeout.millis() >= 0
+                    ? initialTranslogUploadTimeout
+                    : null;
+
                 objectStoreService.uploadTranslogFile(
                     translog.metadata().name(),
                     translog.bytes().data(),
+                    timeout,
                     ActionListener.releaseAfter(ActionListener.wrap(unused -> {
                         logger.debug(() -> format("uploaded translog file [%s]", translog.metadata().name()));
                         assert uploadTryNumber >= 1 && firstAttemptStartMillis != UNSET; // just have an assert in case of a bug
