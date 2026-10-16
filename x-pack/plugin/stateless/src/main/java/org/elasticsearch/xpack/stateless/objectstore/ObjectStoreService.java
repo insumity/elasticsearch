@@ -1575,6 +1575,7 @@ public class ObjectStoreService extends AbstractLifecycleComponent implements Cl
         private final String fileName;
         private final BytesReference reference;
         private final ActionListener<Void> listener;
+        private final TimeValue timeout = TimeValue.MINUS_ONE;
 
         TranslogFileUploadTask(String fileName, BytesReference reference, ActionListener<Void> listener) {
             this.fileName = Objects.requireNonNull(fileName);
@@ -1592,7 +1593,7 @@ public class ObjectStoreService extends AbstractLifecycleComponent implements Cl
             final BlobContainer blobContainer = getTranslogBlobContainer();
 
             var before = threadPool.relativeTimeInMillis();
-            blobContainer.writeBlob(OperationPurpose.TRANSLOG, fileName, reference, false);
+            blobContainer.writeBlob(OperationPurpose.TRANSLOG, fileName, reference, false, timeout);
             var uploadDuration = threadPool.relativeTimeInMillis() - before;
             translogUploadDurationHistogram.record(uploadDuration);
             translogUploadSizeHistogram.record(ByteSizeUnit.BYTES.toKB(reference.length()));

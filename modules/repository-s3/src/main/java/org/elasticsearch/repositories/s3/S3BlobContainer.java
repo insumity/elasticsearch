@@ -156,6 +156,24 @@ class S3BlobContainer extends AbstractBlobContainer {
     }
 
     @Override
+    public void writeBlob(
+        OperationPurpose purpose,
+        String blobName,
+        BytesReference bytes,
+        boolean failIfAlreadyExists,
+        @Nullable TimeValue timeout
+    ) throws IOException {
+        assert BlobContainer.assertPurposeConsistency(purpose, blobName);
+        final var condition = failIfAlreadyExists ? ConditionalOperation.IF_NONE_MATCH : ConditionalOperation.NONE;
+        final var input = bytes.streamInput();
+        if (bytes.length() <= getLargeBlobThresholdInBytes()) {
+            executeSingleUpload(purpose, blobStore, buildKey(blobName), input, bytes.length(), condition, timeout);
+        } else {
+            executeMultipartUpload(purpose, blobStore, buildKey(blobName), input, bytes.length(), condition, timeout);
+        }
+    }
+
+    @Override
     public void writeMetadataBlob(
         OperationPurpose purpose,
         String blobName,
@@ -271,6 +289,18 @@ class S3BlobContainer extends AbstractBlobContainer {
         long size,
         boolean lastPart
     ) {
+        return createPartUploadRequest(purpose, uploadId, number, blobName, size, lastPart, null);
+    }
+
+    private UploadPartRequest createPartUploadRequest(
+        OperationPurpose purpose,
+        String uploadId,
+        int number,
+        String blobName,
+        long size,
+        boolean lastPart,
+        @Nullable TimeValue timeout
+    ) {
         final var uploadPartRequestBuilder = UploadPartRequest.builder();
         uploadPartRequestBuilder.bucket(blobStore.bucket());
         uploadPartRequestBuilder.key(blobName);
@@ -278,7 +308,7 @@ class S3BlobContainer extends AbstractBlobContainer {
         uploadPartRequestBuilder.partNumber(number);
         uploadPartRequestBuilder.contentLength(size);
         uploadPartRequestBuilder.sdkPartType(lastPart ? SdkPartType.LAST : SdkPartType.DEFAULT);
-        S3BlobStore.configureRequestForMetrics(uploadPartRequestBuilder, blobStore, Operation.PUT_MULTIPART_OBJECT, purpose);
+        S3BlobStore.configureUploadRequest(uploadPartRequestBuilder, blobStore, Operation.PUT_MULTIPART_OBJECT, purpose, timeout);
         return uploadPartRequestBuilder.build();
     }
 
@@ -675,7 +705,8 @@ class S3BlobContainer extends AbstractBlobContainer {
         String blobName,
         long contentLength,
         Supplier<RequestBody> body,
-        ConditionalOperation condition
+        ConditionalOperation condition,
+        @Nullable final TimeValue timeout
     ) {
         final var putRequestBuilder = PutObjectRequest.builder()
             .bucket(s3BlobStore.bucket())
@@ -694,7 +725,7 @@ class S3BlobContainer extends AbstractBlobContainer {
                 }
             }
         }
-        S3BlobStore.configureRequestForMetrics(putRequestBuilder, s3BlobStore, Operation.PUT_OBJECT, purpose);
+        S3BlobStore.configureUploadRequest(putRequestBuilder, s3BlobStore, Operation.PUT_OBJECT, purpose, timeout);
         final var putRequest = putRequestBuilder.build();
         try (var client = s3BlobStore.clientReference()) {
             client.client().putObject(putRequest, body.get());
@@ -710,7 +741,8 @@ class S3BlobContainer extends AbstractBlobContainer {
         final String blobName,
         final InputStream input,
         final long blobSize,
-        final ConditionalOperation condition
+        final ConditionalOperation condition,
+        @Nullable final TimeValue timeout
     ) throws IOException {
         try {
             // Extra safety checks
@@ -720,10 +752,24 @@ class S3BlobContainer extends AbstractBlobContainer {
             if (blobSize > s3BlobStore.bufferSizeInBytes()) {
                 throw new IllegalArgumentException("Upload request size [" + blobSize + "] can't be larger than buffer size");
             }
-            putObject(purpose, s3BlobStore, blobName, blobSize, () -> RequestBody.fromInputStream(input, blobSize), condition);
+            putObject(purpose, s3BlobStore, blobName, blobSize, () -> RequestBody.fromInputStream(input, blobSize), condition, timeout);
         } catch (final SdkException e) {
             throw new IOException("Unable to upload object [" + blobName + "] using a single upload", e);
         }
+    }
+
+    /**
+     * Uploads a blob using a single upload request
+     */
+    void executeSingleUpload(
+        OperationPurpose purpose,
+        final S3BlobStore s3BlobStore,
+        final String blobName,
+        final InputStream input,
+        final long blobSize,
+        final ConditionalOperation condition
+    ) throws IOException {
+        executeSingleUpload(purpose, s3BlobStore, blobName, input, blobSize, condition, null);
     }
 
     private interface PartOperation {
@@ -810,6 +856,22 @@ class S3BlobContainer extends AbstractBlobContainer {
         final long blobSize,
         final ConditionalOperation condition
     ) throws IOException {
+        executeMultipartUpload(purpose, s3BlobStore, blobName, input, blobSize, condition, null);
+    }
+
+    /**
+     * Uploads a blob using multipart upload requests. A non-null {@code timeout} bounds each part upload request and performs no SDK
+     * retries for it, see {@link S3BlobStore#configureUploadRequest}.
+     */
+    void executeMultipartUpload(
+        OperationPurpose purpose,
+        final S3BlobStore s3BlobStore,
+        final String blobName,
+        final InputStream input,
+        final long blobSize,
+        final ConditionalOperation condition,
+        @Nullable final TimeValue timeout
+    ) throws IOException {
         executeMultipart(
             purpose,
             Operation.PUT_MULTIPART_OBJECT,
@@ -818,7 +880,15 @@ class S3BlobContainer extends AbstractBlobContainer {
             s3BlobStore.bufferSizeInBytes(),
             blobSize,
             (uploadId, partNum, partSize, lastPart) -> {
-                final UploadPartRequest uploadRequest = createPartUploadRequest(purpose, uploadId, partNum, blobName, partSize, lastPart);
+                final UploadPartRequest uploadRequest = createPartUploadRequest(
+                    purpose,
+                    uploadId,
+                    partNum,
+                    blobName,
+                    partSize,
+                    lastPart,
+                    timeout
+                );
 
                 try (var clientReference = s3BlobStore.clientReference()) {
                     final UploadPartResponse uploadResponse = clientReference.client()
@@ -1358,7 +1428,8 @@ class S3BlobContainer extends AbstractBlobContainer {
                             buildKey(key),
                             updated.length(),
                             () -> RequestBody.fromBytes(BytesReference.toBytes(updated)),
-                            conditionalOperation
+                            conditionalOperation,
+                            null
                         );
                         return OptionalBytesReference.of(expected);
                     } catch (SdkServiceException e) {

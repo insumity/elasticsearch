@@ -11,12 +11,15 @@ package org.elasticsearch.repositories.s3;
 
 import software.amazon.awssdk.awscore.AwsRequest;
 import software.amazon.awssdk.awscore.AwsRequestOverrideConfiguration;
+import software.amazon.awssdk.core.SdkPlugin;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.metrics.CoreMetric;
 import software.amazon.awssdk.core.retry.RetryUtils;
 import software.amazon.awssdk.http.HttpMetric;
 import software.amazon.awssdk.metrics.MetricCollection;
 import software.amazon.awssdk.metrics.MetricPublisher;
+import software.amazon.awssdk.retries.DefaultRetryStrategy;
 import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
 import software.amazon.awssdk.services.s3.model.ObjectCannedACL;
 import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
@@ -48,6 +51,7 @@ import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.threadpool.ThreadPool;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -669,6 +673,35 @@ class S3BlobStore implements BlobStore {
             builder.metricPublishers(List.of(blobStore.getMetricPublisher(operation, purpose)));
             blobStore.addPurposeQueryParameter(purpose, builder);
         });
+    }
+
+
+    // a request-level plugin to disable retries for this request
+    private static final SdkPlugin NO_RETRY_PLUGIN = config -> config.overrideConfiguration(
+        ClientOverrideConfiguration.builder().retryStrategy(DefaultRetryStrategy.doNotRetry()).build()
+    );
+
+    // Similar to `configureRequestForMetrics` but for requests that upload data. If timeout is provided, the whole request is bounded by
+    // it, and we only do one attempt (i.e., NO retries).
+    static void configureUploadRequest(
+        AwsRequest.Builder request,
+        S3BlobStore blobStore,
+        Operation operation,
+        OperationPurpose purpose,
+        @Nullable TimeValue timeout
+    ) {
+        request.overrideConfiguration(builder -> {
+            builder.metricPublishers(List.of(blobStore.getMetricPublisher(operation, purpose)));
+            blobStore.addPurposeQueryParameter(purpose, builder);
+            if (timeout != null) {
+                builder.apiCallTimeout(Duration.ofMillis(timeout.millis()));
+                builder.addPlugin(NO_RETRY_PLUGIN);
+            }
+        });
+    }
+
+    static void configureUploadRequest(AwsRequest.Builder request, S3BlobStore blobStore, Operation operation, OperationPurpose purpose) {
+        configureUploadRequest(request, blobStore, operation, purpose, null);
     }
 
     public void addPurposeQueryParameter(OperationPurpose purpose, AwsRequestOverrideConfiguration.Builder builder) {

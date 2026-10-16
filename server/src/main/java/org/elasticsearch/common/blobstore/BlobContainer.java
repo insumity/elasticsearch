@@ -14,6 +14,7 @@ import org.elasticsearch.common.blobstore.support.BlobMetadata;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.core.CheckedConsumer;
 import org.elasticsearch.core.Nullable;
+import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.repositories.blobstore.BlobStoreRepository;
 
 import java.io.IOException;
@@ -123,6 +124,21 @@ public interface BlobContainer {
         throws IOException {
         assert assertPurposeConsistency(purpose, blobName);
         writeBlob(purpose, blobName, bytes.streamInput(), bytes.length(), failIfAlreadyExists);
+    }
+
+    /**
+     * Same as {@link #writeBlob(OperationPurpose, String, BytesReference, boolean)}, with an optional timeout. An implementations that
+     * support timeouts (e.g., S3) can override this and pass the timeout to its requests. Note that if timeout is provided the underlying
+     * implementation is NOT performing any retries.
+     */
+    default void writeBlob(
+        OperationPurpose purpose,
+        String blobName,
+        BytesReference bytes,
+        boolean failIfAlreadyExists,
+        @Nullable TimeValue timeout
+    ) throws IOException {
+        writeBlob(purpose, blobName, bytes, failIfAlreadyExists);
     }
 
     /**
